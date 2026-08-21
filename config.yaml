@@ -1,0 +1,179 @@
+# ProdKit configuration for SR71.
+#
+# Everything team-specific lives here. No project names, channel IDs, column
+# names or people appear in the code — which is what makes this deployable on
+# someone else's board without editing Python.
+#
+# Secrets do NOT belong in this file. Tokens live in .env, which is gitignored.
+# This file is safe to commit and is meant to be read as documentation of how
+# a team is set up.
+
+jira:
+  project_key: SR71
+
+  # Maps this board's column names onto the four states the tools understand.
+  # Teams name columns differently — Doing, WIP, Code Review — so this is the
+  # single place that knowledge lives. Change the left side to match a board;
+  # never change the right side.
+  status_map:
+    "To Do": todo
+    "In Progress": in_progress
+    "In Review": in_review
+    "Done": done
+
+  # Which canonical states count as work actively underway. Used to decide
+  # whether a ticket gets a "how's it going" question or a "can you start"
+  # question, and later by the cycle-time engine.
+  active_states:
+    - in_progress
+    - in_review
+
+  # Applied to a ticket when someone reports being blocked. A label rather
+  # than a column, so the ticket stays in the status that reflects its real
+  # state and cycle-time measurement is unaffected.
+  blocked_label: blocked
+
+review:
+  # When off, the completion button reads "Done" and closes the ticket.
+  # When on, it reads "Ready for review", moves the ticket to In Review, and
+  # hands it to a reviewer who gets approve / send back buttons in their own
+  # standup.
+  #
+  # Off is a legitimate choice: on a team with no review step, forcing one
+  # makes the tool wrong for them. On means the In Review column means
+  # something, rather than being decoration.
+  enabled: true
+
+  # component_lead — read the Lead field off the ticket's Jira component
+  # fixed        — always the person named below
+  # none         — leave unassigned and flag it in the digest
+  #
+  # component_lead reads from Jira rather than duplicating the mapping here,
+  # so there's one source of truth and it can't go stale.
+  reviewer: component_lead
+  fixed_reviewer: Farnoud
+
+discord:
+  guild_id: 1539759023170261016
+
+  # Where per-person prompts go. In thread mode the bot opens one thread per
+  # person inside this channel.
+  standup_channel_id: 1539759340360310874
+
+  # Where the daily digest is posted.
+  digest_channel_id: 1539759385906126918
+
+  # thread — one visible thread per person inside standup_channel_id
+  # dm       — private direct messages
+  #
+  # Threads are the demo mode: the whole flow is visible in one frame for
+  # video capture, and nobody's private messages are exposed. DM is the mode
+  # a real deployment would use. Same code path either way.
+  mode: thread
+
+  # Default age threshold for `bot.py clean`. Threads younger than this are
+  # left alone, so a cleanup run mid-sprint can't wipe the current week.
+  cleanup_keep_days: 14
+
+  # In thread mode, DM each person a link to their thread. They tap the
+  # notification and land in the right place without going to the channel.
+  # Full visibility for demo capture, zero navigation for the team.
+  dm_thread_link: true
+
+schedule:
+  # All times are local to each person, resolved through their own timezone
+  # below. On a single-timezone team these are identical for everyone; the
+  # per-person resolution exists so adding a remote teammate needs no code
+  # change.
+  prompt_time: "11:00"
+  nudge_time: "12:30"
+  cutoff_time: "13:00"
+
+  # End-of-day check-in. A separate message rather than asking people to
+  # scroll back into the morning thread — once someone has tapped through,
+  # that thread is closed in their head, and expecting them to return is
+  # asking for a behaviour change the tool exists to avoid.
+  eod_time: "18:00"
+  eod_enabled: true
+
+  # Buttons never expire, so this is not a lockout — it marks answers arriving
+  # after it as late in the record. Someone answering at 21:00 every night is
+  # information, not something to prevent.
+  eod_close_time: "19:00"
+
+  # Days the bot runs. 0 = Monday.
+  active_days: [0, 1, 2, 3, 4]
+
+ranking:
+  # Ordered rules, applied top to bottom. Reorder to change priority, delete a
+  # line to drop a rule. Named rules rather than numeric weights, because
+  # weights nobody understands don't get tuned — they get ignored.
+
+  # Which active tickets fill the question slots. This is a hidden selector:
+  # every active ticket gets the same neutral question regardless of rank, so
+  # nobody can tell why theirs was picked. The point is to spend limited slots
+  # on the tickets the producer knows least about.
+  active: [stalled, due_soon, oldest]
+
+  # Which To Do tickets get asked about. Newly-unblocked comes first and it
+  # isn't close — a blocker that just went Done is the most time-sensitive
+  # thing on a board, and if a cap ever swallows that question the handoff
+  # feature effectively doesn't exist.
+  todo: [newly_unblocked, due_soon, oldest]
+
+  # What the "starting anything else?" dropdown offers. Shortest estimate
+  # first, so finishing something produces a completed signal today rather
+  # than on Thursday — small tickets clear faster and produce more frequent,
+  # more accurate status. Deadlines still jump the queue.
+  dropdown: [due_soon, priority, shortest, oldest]
+
+limits:
+  # Caps on how many tickets a person is asked about. Without these, someone
+  # with twelve open tickets gets twelve messages and answers none of them.
+  # Sorted by due date, soonest first.
+  max_in_progress: 3
+  max_todo: 2
+
+  # How many extra tickets the "starting anything else?" dropdown offers.
+  # Deliberately small: choosing what to start is the decision people struggle
+  # with, and a list of everything makes it harder, not easier.
+  dropdown_options: 3
+
+  # Nobody is offered new work past this many tickets already active. Someone
+  # spread across five tickets doesn't need a sixth — they need the producer to
+  # notice, which is what the digest flag is for.
+  max_active_wip: 3
+
+team:
+  - name: Farnoud
+    discipline: Design
+    jira_account_id: "70121:ea3b346f-d9d2-45f8-8c40-2290145e7a23"
+    discord_user_id: 699984861632659527
+    timezone: America/Vancouver
+    work_start: 9
+    work_end: 18
+
+  # The five below join on test day. Their Jira account IDs appear once they
+  # accept a board invite; their Discord user IDs appear in check.py output
+  # once they join the server. Neither has to be asked for by hand.
+  #
+  # - name: Levi
+  #   discipline: Engineering
+  #   jira_account_id: ""
+  #   discord_user_id: 0
+  #   timezone: America/Vancouver
+  #   work_start: 9
+  #   work_end: 18
+  #
+  # - name: Sang
+  #   discipline: Art
+  #   ...
+  #
+  # - name: Mia
+  #   discipline: UI
+  #
+  # - name: Luca
+  #   discipline: Rigging
+  #
+  # - name: Jordan
+  #   discipline: Audio
