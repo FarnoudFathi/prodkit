@@ -31,7 +31,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-SESSION_DIR = Path(__file__).parent / "sessions"
+# Overridable so a host can point it at a mounted volume. Container
+# filesystems are wiped on every redeploy — without a volume, deploying a fix
+# at noon would erase the morning's answers and the digest would report
+# everyone as a non-responder.
+SESSION_DIR = Path(os.environ.get("PRODKIT_SESSION_DIR",
+                                  Path(__file__).parent / "sessions"))
 
 # How many days back to look when deciding whether a handoff was already
 # settled, or how long a failure has been running. Two working weeks is well

@@ -1,0 +1,6 @@
+sessions/
+.vs/
+.git/
+__pycache__/
+*.pyc
+.env
