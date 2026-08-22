@@ -164,7 +164,10 @@ class Scheduler:
 
     async def _tick(self):
         now = datetime.now(timezone.utc)
-        date_key = now.strftime("%Y-%m-%d")
+        # Project-local, not UTC. In UTC the day rolls over at 17:00 Pacific,
+        # which reset the session mid-afternoon and re-fired the digest against
+        # an empty day.
+        date_key = self.config.date_key(now)
         session = self.store.load(date_key)
 
         events = due_events(

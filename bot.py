@@ -740,8 +740,17 @@ class StandupBot(discord.Client):
             raise RuntimeError("Cannot see the digest channel — check permissions")
 
         now = datetime.now(timezone.utc)
-        date_key = now.strftime("%Y-%m-%d")
+        date_key = self.config.date_key(now)
         session = STORE.load(date_key)
+
+        # Nothing was asked today, so there is nothing to report. Without this
+        # the bot posts an empty digest on any day it happens to be running but
+        # not prompting — a weekend, or a day the schedule was changed.
+        if not session.asked:
+            print(f"No standup was posted for {date_key} — skipping digest")
+            session.mark_fired("digest")
+            STORE.save(session)
+            return
 
         issues = self.jira.fetch_open_issues()
         issues_by_key = {i.key: i for i in issues}
@@ -955,12 +964,23 @@ if __name__ == "__main__":
         print(f"Config problem: {e}")
         sys.exit(1)
 
+    jira = JiraClient(secrets, config)
+
+    # Startup check. Distinguishes a configuration problem from a transient one:
+    # a rejected token means the bot can never work and should stop loudly, but
+    # a DNS blip or a brief Atlassian outage should not put a hosted service
+    # into a crash-restart loop. The scheduler retries failed events anyway.
     try:
-        jira = JiraClient(secrets, config)
         jira.fetch_open_issues()
+        print(f"Jira reachable — {config.project_key}")
     except JiraError as e:
-        print(f"Jira problem: {e}")
-        sys.exit(1)
+        message = str(e)
+        fatal = "401" in message or "403" in message or "credentials" in message.lower()
+        if fatal:
+            print(f"Jira rejected the credentials: {e}")
+            sys.exit(1)
+        print(f"Jira unreachable at startup: {e}")
+        print("Continuing — scheduled events will retry.")
 
     JIRA = jira
     BLOCKED_LABEL = config.blocked_label

@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -89,6 +90,27 @@ class Config:
 
     team: list[Person]
 
+    @property
+    def project_timezone(self):
+        """
+        The timezone that defines when "today" starts and ends.
+
+        The session file is shared by the whole team, so the day boundary has to
+        be one agreed instant rather than each person's midnight. The first team
+        member's zone is used, which on a single-timezone team is simply the
+        team's zone, and on a distributed one anchors the day to the producer.
+
+        This is not cosmetic. Deriving the date in UTC means the day rolls over
+        at 17:00 Pacific — mid-afternoon, hours before anyone has finished. The
+        session would reset while people are still answering, and the digest
+        would fire again against an empty day.
+        """
+        return self.team[0].calendar.tz
+
+    def date_key(self, now: datetime) -> str:
+        """Today's session key, in project-local time."""
+        return now.astimezone(self.project_timezone).strftime("%Y-%m-%d")
+
     def person_by_jira_id(self, account_id: str) -> Person | None:
         for person in self.team:
             if person.jira_account_id == account_id:
@@ -118,20 +140,53 @@ class Config:
         return self.status_map[jira_status_name]
 
 
+def _clean_env(name: str) -> str | None:
+    """
+    Read an environment variable and strip surrounding whitespace.
+
+    Pasting a value into a hosting dashboard frequently carries a trailing
+    newline, and nothing downstream notices: the newline gets URL-encoded as
+    %0a and lands in a DNS lookup, producing a "name or service not known"
+    error that names a hostname looking correct to the eye.
+
+    Stripping here rather than at each use means the whole program can trust
+    these values. Cheap, and it removes a class of failure that is genuinely
+    hard to read when it happens.
+    """
+    value = os.getenv(name)
+    return value.strip() if value else value
+
+
 def load_secrets() -> Secrets:
+    # No .env file on a host — python-dotenv is a no-op there and os.getenv
+    # falls through to real environment variables.
     load_dotenv()
     required = {
-        "JIRA_SITE": os.getenv("JIRA_SITE"),
-        "JIRA_EMAIL": os.getenv("JIRA_EMAIL"),
-        "JIRA_API_TOKEN": os.getenv("JIRA_API_TOKEN"),
-        "DISCORD_BOT_TOKEN": os.getenv("DISCORD_BOT_TOKEN"),
+        "JIRA_SITE": _clean_env("JIRA_SITE"),
+        "JIRA_EMAIL": _clean_env("JIRA_EMAIL"),
+        "JIRA_API_TOKEN": _clean_env("JIRA_API_TOKEN"),
+        "DISCORD_BOT_TOKEN": _clean_env("DISCORD_BOT_TOKEN"),
     }
     missing = [key for key, value in required.items() if not value]
     if missing:
-        raise ConfigError(f"Missing from .env: {', '.join(missing)}")
+        raise ConfigError(
+            f"Missing: {', '.join(missing)} — set these in .env locally, "
+            f"or as environment variables on your host"
+        )
+
+    site = required["JIRA_SITE"]
+    # A site value carrying a scheme or path would produce a malformed URL that
+    # fails somewhere less obvious than here.
+    if site.startswith("http"):
+        raise ConfigError(
+            f"JIRA_SITE should be a bare hostname like yourteam.atlassian.net, "
+            f"not a URL — got {site!r}"
+        )
+    if "/" in site:
+        raise ConfigError(f"JIRA_SITE should not contain a path — got {site!r}")
 
     return Secrets(
-        jira_site=required["JIRA_SITE"],
+        jira_site=site,
         jira_email=required["JIRA_EMAIL"],
         jira_api_token=required["JIRA_API_TOKEN"],
         discord_bot_token=required["DISCORD_BOT_TOKEN"],
