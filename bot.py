@@ -515,6 +515,12 @@ class StartSelect(
         )
 
 
+def guild_member(bot, person):
+    """Resolve a config person to a Discord member, or None if they've left."""
+    guild = bot.get_guild(bot.config.guild_id)
+    return guild.get_member(person.discord_user_id) if guild else None
+
+
 def build_view(date_key: str, question: Question) -> discord.ui.View | None:
     if not question.buttons:
         return None
@@ -638,12 +644,28 @@ class StandupBot(discord.Client):
             return
         thread = self.get_channel(thread_id) or await self.fetch_channel(thread_id)
 
+        guild = self.get_guild(self.config.guild_id)
         issues = {i.key: i for i in self.jira.fetch_open_issues()}
 
         await thread.send(
             f"{person.mention} how did today go? "
             f"One tap each — no need to open Jira."
         )
+
+        # A mention inside a thread is easy to miss — thread notifications are
+        # off by default for many people, and by 18:00 nobody is watching the
+        # morning thread anyway. The DM is what actually reaches them, same as
+        # the morning prompt. The thread stays the place the exchange happens.
+        if self.config.dm_thread_link:
+            member = guild_member(self, person)
+            if member:
+                try:
+                    await member.send(
+                        f"End of day check-in — {thread.mention}\n"
+                        f"{len(started)} ticket(s) to close out."
+                    )
+                except discord.Forbidden:
+                    print(f"  {person.name}: DMs closed, thread mention only")
 
         for key in started:
             issue = issues.get(key)
