@@ -78,6 +78,7 @@ class Config:
 
     max_in_progress: int
     max_todo: int
+    max_review: int
     dropdown_options: int
     max_active_wip: int
 
@@ -122,6 +123,18 @@ class Config:
             if person.discord_user_id == user_id:
                 return person
         return None
+
+    @property
+    def wip_states(self) -> set[State]:
+        """
+        States that count toward someone's work-in-progress load.
+
+        Review is deliberately excluded. Reviewing five tickets is not the same
+        kind of load as juggling five of your own, and counting them together
+        produced a "7 tickets active" warning that overstated what was actually
+        being carried.
+        """
+        return {s for s in self.active_states if s is not State.IN_REVIEW}
 
     def state_for(self, jira_status_name: str) -> State:
         """
@@ -372,6 +385,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         active_days=tuple(schedule.get("active_days", [0, 1, 2, 3, 4])),
         max_in_progress=int(limits.get("max_in_progress", 3)),
         max_todo=int(limits.get("max_todo", 2)),
+        max_review=int(limits.get("max_review", 3)),
         dropdown_options=int(limits.get("dropdown_options", 3)),
         max_active_wip=int(limits.get("max_active_wip", 3)),
         rank_active=tuple(ranking.get("active", ["stalled", "due_soon", "oldest"])),

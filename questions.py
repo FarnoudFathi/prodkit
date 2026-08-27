@@ -329,9 +329,22 @@ def build_prompt(
         headline=f"Morning {person.name} — standup for {now.strftime('%a %d %b')}.",
     ))
 
+    # Longest-waiting first. Previously these were ordered by due date, so a
+    # review ticket with no due date sorted last and the OLDEST item in the
+    # queue was the one dropped by the cap — the exact opposite of what the
+    # feature is for. What falls off the end now is the newest, which comes
+    # back tomorrow while still fresh.
+    def waited(issue: Issue) -> float:
+        moved = last_moved.get(issue.key)
+        if not moved:
+            return 0.0
+        return business_hours_between(moved, now, person.calendar)
+
+    reviewing = sorted(reviewing, key=lambda i: -waited(i))
+
     # Review sits above the person's own work: it unblocks someone else, and
     # a review queue that silts up is the main failure mode of adding the step.
-    for issue in reviewing[: config.max_in_progress]:
+    for issue in reviewing[: config.max_review]:
         waiting = ""
         moved = last_moved.get(issue.key)
         if moved:
@@ -342,6 +355,16 @@ def build_prompt(
             headline=f"{issue.key} · {issue.summary}",
             detail_lines=[f"Ready for your review{' · ' + waiting if waiting else ''}"],
             buttons=review_buttons(),
+        ))
+
+    # The cap limits taps, not information. Anything beyond it is named here
+    # and listed in full in the digest, so nothing is ever silently hidden.
+    overflow = len(reviewing) - config.max_review
+    if overflow > 0:
+        questions.append(Question(
+            kind=Kind.INFO,
+            issue=None,
+            headline=f"{overflow} more waiting your review — full list in the digest.",
         ))
 
     for issue in rank_active(active_all, last_moved, person, now)[: config.max_in_progress]:

@@ -134,6 +134,14 @@ limits:
   max_in_progress: 3
   max_todo: 2
 
+  # Reviews get their own budget rather than sharing the active-work one.
+  # A review tap is cheaper — "does this meet the bar" is answerable from the
+  # ticket, where "how's this going" makes someone think about their own work.
+  # Still capped: without a limit, a lead with six reviews plus their own
+  # tickets opens Discord to a wall, and the person everyone is waiting on is
+  # the worst one to lose.
+  max_review: 3
+
   # How many extra tickets the "starting anything else?" dropdown offers.
   # Deliberately small: choosing what to start is the decision people struggle
   # with, and a list of everything makes it harder, not easier.

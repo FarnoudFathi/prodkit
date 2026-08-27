@@ -200,7 +200,7 @@ def build_digest(inp: DigestInput) -> DigestResult:
     for person in inp.people:
         active = [i for i in inp.issues_by_key.values()
                   if i.assignee_id == person.jira_account_id
-                  and i.state in inp.config.active_states]
+                  and i.state in inp.config.wip_states]
         if len(active) > inp.config.max_active_wip:
             risk.append(
                 f"⚖️ **{person.name}** — {len(active)} tickets active, "
