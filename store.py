@@ -261,6 +261,19 @@ class Store:
                 out.append(self.load(key))
         return out
 
+    def previous_session(self, today: str) -> "Session | None":
+        """
+        The most recent earlier day on which anyone actually answered.
+
+        "Yesterday" is the wrong unit — after a weekend or a holiday the last
+        real standup is three days back, and reporting "nothing from yesterday"
+        would be technically true and useless. Skips empty days instead.
+        """
+        for session in self.recent_sessions(today):
+            if session.answers:
+                return session
+        return None
+
     def settled_handoffs(self, user_id: int, today: str) -> set[str]:
         """
         Tickets where this person already confirmed receipt on an earlier day.

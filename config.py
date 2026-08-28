@@ -66,6 +66,7 @@ class Config:
     guild_id: int
     standup_channel_id: int
     digest_channel_id: int
+    notes_channel_id: int
     mode: str
 
     prompt_time: str
@@ -375,6 +376,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         guild_id=int(_require(discord_cfg, "guild_id", "discord")),
         standup_channel_id=int(_require(discord_cfg, "standup_channel_id", "discord")),
         digest_channel_id=int(_require(discord_cfg, "digest_channel_id", "discord")),
+        notes_channel_id=int(discord_cfg.get("notes_channel_id", 0)),
         mode=mode,
         prompt_time=prompt,
         nudge_time=nudge,

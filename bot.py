@@ -409,6 +409,31 @@ SEVERITY_COLOUR = {
 }
 
 
+def _fit(lines, limit=1000):
+    """Embed fields cap at 1024 characters. Truncate with a count rather than
+    dropping silently — a digest that quietly omits three blockers is worse
+    than one that admits it did."""
+    kept, total = [], 0
+    for line in lines:
+        if total + len(line) + 1 > limit:
+            return "\n".join(kept) + f"\n_… and {len(lines) - len(kept)} more_"
+        kept.append(line)
+        total += len(line) + 1
+    return "\n".join(kept)
+
+
+def roster_embed(result: DigestResult) -> discord.Embed:
+    """The per-person view, posted into a thread on the attention message."""
+    embed = discord.Embed(
+        title="Roster",
+        description="_Where everyone is. Repeats some of the above with context._",
+        colour=discord.Colour(0x4A5058),
+    )
+    for section in result.roster:
+        embed.add_field(name=section.heading, value=_fit(section.lines), inline=False)
+    return embed
+
+
 def digest_embed(result: DigestResult) -> discord.Embed:
     """
     Render the digest as an embed.
@@ -427,20 +452,10 @@ def digest_embed(result: DigestResult) -> discord.Embed:
         colour=SEVERITY_COLOUR[result.severity],
     )
 
-    for section in result.sections:
-        body = "\n".join(section.lines)
-        if len(body) > 1024:
-            kept, length = [], 0
-            for line in section.lines:
-                if length + len(line) + 1 > 950:
-                    break
-                kept.append(line)
-                length += len(line) + 1
-            hidden = len(section.lines) - len(kept)
-            body = "\n".join(kept) + f"\n_… and {hidden} more_"
-        embed.add_field(name=section.heading, value=body, inline=False)
+    for section in result.top:
+        embed.add_field(name=section.heading, value=_fit(section.lines), inline=False)
 
-    if not result.sections:
+    if not result.top:
         embed.add_field(
             name="✅ Nothing needs you",
             value="No blockers, no handoff failures, nothing at risk.",
@@ -682,6 +697,44 @@ class StandupBot(discord.Client):
                 view=view,
             )
 
+    async def post_notes(self, session, now: datetime):
+        """
+        Post the day's team notes to a shared channel.
+
+        Notes were landing in each person's own standup thread, where nobody
+        else sees them — which defeats the point. The field exists so the tool
+        feels like a team space rather than a reporting mechanism, and that only
+        works if the team can read them.
+
+        Collected privately during standup, posted once at cutoff.
+        """
+        if not self.config.notes_channel_id:
+            return
+
+        collected = []
+        for person in self.config.team:
+            for key, answer in session.raw_answers(person.discord_user_id).items():
+                if answer.action == "note" and answer.text:
+                    collected.append(f"**{person.name}**  {answer.text}")
+
+        if not collected:
+            return
+
+        channel = self.get_guild(self.config.guild_id).get_channel(
+            self.config.notes_channel_id
+        )
+        if channel is None:
+            print("  notes channel not visible — skipped")
+            return
+
+        embed = discord.Embed(
+            title=f"Notes — {now.strftime('%a %d %b')}",
+            description="\n".join(collected),
+            colour=discord.Colour(0x4A5058),
+        )
+        await channel.send(embed=embed)
+        print(f"  {len(collected)} note(s) posted to #{channel.name}")
+
     async def clean(self, targets: str, delete: bool, older_than_days: int):
         """
         Tidy up threads and digest posts.
@@ -788,10 +841,15 @@ class StandupBot(discord.Client):
                 if bounced:
                     bounces[issue.key] = bounced
 
-        flags = []
+        # Staleness is rebuilt from the board at digest time rather than reused
+        # from the morning. Six hours have passed; a ticket that was fine at
+        # 11:00 may have crossed the threshold by cutoff.
+        stale = {}
         for person in self.config.team:
             prompt = build_prompt(person, issues, self.config, now, last_moved)
-            flags.extend(prompt.flags)
+            for flag in prompt.flags:
+                if flag.kind == "stale":
+                    stale[flag.issue.key] = flag.detail
 
         # Repeated corrections on one ticket are worth surfacing — an honest
         # mis-tap happens once, a pattern is something else.
@@ -805,15 +863,31 @@ class StandupBot(discord.Client):
             date_label=now.strftime("%a %d %b"),
             config=self.config,
             session=session,
+            previous=STORE.previous_session(date_key),
             store=STORE,
             date_key=date_key,
             people=self.config.team,
             issues_by_key=issues_by_key,
-            flags=flags,
+            now=now,
+            stale=stale,
             board_flags=board_flags,
         ))
 
-        await channel.send(embed=digest_embed(result))
+        message = await channel.send(embed=digest_embed(result))
+
+        await self.post_notes(session, now)
+
+        # The roster goes into a thread on the digest. Threads render collapsed,
+        # so the channel stays scannable and the detail is one click away —
+        # and the attention message screenshots cleanly on its own.
+        try:
+            thread = await message.create_thread(
+                name=f"Roster — {now.strftime('%d %b')}",
+                auto_archive_duration=1440,
+            )
+            await thread.send(embed=roster_embed(result))
+        except discord.HTTPException as e:
+            print(f"  could not create roster thread: {e}")
         session.digest_posted = True
         session.mark_fired("digest")
         STORE.save(session)

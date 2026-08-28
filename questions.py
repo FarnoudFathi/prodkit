@@ -219,7 +219,12 @@ def dropdown_options(
     notice, which is what the digest flag does.
     """
     theirs = [i for i in issues if i.assignee_id == person.jira_account_id]
-    active = [i for i in theirs if i.state in config.active_states]
+
+    # Only work in progress counts against the cap. Tickets held for review are
+    # somebody else's work awaiting a decision, not load being carried — and
+    # counting them here suppressed the dropdown entirely for anyone with a
+    # review queue, which is exactly the person most likely to have capacity.
+    active = [i for i in theirs if i.state in config.wip_states]
     if len(active) >= config.max_active_wip:
         return []
 

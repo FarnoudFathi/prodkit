@@ -63,6 +63,13 @@ discord:
   # Where the daily digest is posted.
   digest_channel_id: 1539759385906126918
 
+  # Where team notes are posted, once per day at cutoff. Notes are the one
+  # part of standup meant for the team rather than the producer — a spare
+  # ticket, a build tip — so they belong in a channel everyone reads, not
+  # buried in one person's private standup thread. Set to the same value as
+  # digest_channel_id to keep them together, or 0 to drop the feature.
+  notes_channel_id: 1539759024432484396
+
   # thread — one visible thread per person inside standup_channel_id
   # dm       — private direct messages
   #
