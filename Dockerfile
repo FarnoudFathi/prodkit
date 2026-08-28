@@ -20,4 +20,8 @@ COPY . .
 # answers.
 ENV PRODKIT_SESSION_DIR=/data/sessions
 
+# Runtime settings changed from Discord live on the volume too — config.yaml
+# ships with the code and is overwritten on every deploy.
+ENV PRODKIT_SETTINGS_PATH=/data/settings.json
+
 CMD ["python", "bot.py", "run"]

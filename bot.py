@@ -38,6 +38,7 @@ from jira_client import JiraClient, JiraError
 from questions import Kind, PersonPrompt, Question, build_prompt, dropdown_options
 from digest import DigestInput, DigestResult, build_digest
 from scheduler import Event, Scheduler
+from settings import Overlay
 from store import Store
 from writeback import apply_action, undo_action
 
@@ -555,6 +556,252 @@ def render_message(question: Question) -> str:
     return "\n".join(lines)
 
 
+# ============================================================================
+# Slash commands
+#
+# A producer changing the standup time should not need a redeploy. These write
+# to the settings overlay on the persistent volume and reload config in place.
+#
+# Restricted to members who can manage the server. Anyone on the team could
+# otherwise move everyone's standup, and the failure would be silent until
+# nobody got prompted.
+# ============================================================================
+
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+            "Saturday", "Sunday"]
+
+
+def _valid_clock(value: str) -> bool:
+    try:
+        h, m = (int(x) for x in value.split(":"))
+        return 0 <= h <= 23 and 0 <= m <= 59
+    except (ValueError, AttributeError):
+        return False
+
+
+def register_commands(bot):
+    tree = bot.tree
+    group = discord.app_commands.Group(
+        name="standup",
+        description="Configure and run the standup bot",
+        default_permissions=discord.Permissions(manage_guild=True),
+    )
+
+    # ---------------------------------------------------------------- status
+    @group.command(name="status", description="Show the current configuration")
+    async def status(interaction: discord.Interaction):
+        c = bot.config
+        overrides = Overlay().describe()
+        embed = discord.Embed(title=f"{c.project_key} — current settings",
+                              colour=discord.Colour(0x4A5058))
+        embed.add_field(
+            name="Schedule",
+            value=(f"Prompt **{c.prompt_time}** · Nudge **{c.nudge_time}** · "
+                   f"Cutoff **{c.cutoff_time}**\n"
+                   + (f"End of day **{c.eod_time}**, closes {c.eod_close_time}"
+                      if c.eod_enabled else "End of day **off**")
+                   + "\nDays " + ", ".join(WEEKDAYS[d][:3] for d in c.active_days)),
+            inline=False)
+        embed.add_field(
+            name="Channels",
+            value=(f"Standup <#{c.standup_channel_id}> · "
+                   f"Digest <#{c.digest_channel_id}>"
+                   + (f" · Notes <#{c.notes_channel_id}>" if c.notes_channel_id else "")),
+            inline=False)
+        embed.add_field(
+            name="Limits",
+            value=(f"In progress **{c.max_in_progress}** · Review **{c.max_review}** · "
+                   f"To Do **{c.max_todo}** · WIP cap **{c.max_active_wip}**"),
+            inline=False)
+        embed.add_field(
+            name="Review",
+            value=("on, reviewer = " + c.review.reviewer) if c.review.enabled else "off",
+            inline=False)
+        embed.add_field(
+            name="Runtime overrides",
+            value=("\n".join(f"`{o}`" for o in overrides)
+                   if overrides else "_none — running on config.yaml_"),
+            inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # ------------------------------------------------------------------ time
+    @group.command(name="time", description="Change a standup time")
+    @discord.app_commands.describe(
+        event="Which time to change",
+        value="24-hour local time, e.g. 09:30",
+    )
+    @discord.app_commands.choices(event=[
+        discord.app_commands.Choice(name="Morning prompt", value="prompt_time"),
+        discord.app_commands.Choice(name="Nudge", value="nudge_time"),
+        discord.app_commands.Choice(name="Cutoff (digest posts)", value="cutoff_time"),
+        discord.app_commands.Choice(name="End of day check-in", value="eod_time"),
+        discord.app_commands.Choice(name="End of day close", value="eod_close_time"),
+    ])
+    async def set_time(interaction: discord.Interaction,
+                       event: discord.app_commands.Choice[str], value: str):
+        if not _valid_clock(value):
+            await interaction.response.send_message(
+                f"`{value}` isn't a time — use 24-hour like `09:30`.", ephemeral=True)
+            return
+
+        overlay = Overlay()
+        overlay.set(f"schedule.{event.value}", value)
+        try:
+            bot.reload_config()
+        except Exception as e:
+            # The new value broke validation — ordering, most likely. Roll back
+            # rather than leave the bot unable to reload.
+            overlay.unset(f"schedule.{event.value}")
+            bot.reload_config()
+            await interaction.response.send_message(
+                f"Rejected: {e}\nTimes must run prompt < nudge < cutoff < end of day.",
+                ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            f"**{event.name}** is now **{value}**, in each person's local time. "
+            f"Takes effect on the next run.", ephemeral=True)
+
+    # -------------------------------------------------------------- workdays
+    @group.command(name="workdays", description="Set which days the bot runs")
+    @discord.app_commands.describe(
+        days="Comma-separated: mon,tue,wed,thu,fri — or 'weekdays'"
+    )
+    async def workdays(interaction: discord.Interaction, days: str):
+        lookup = {d[:3].lower(): i for i, d in enumerate(WEEKDAYS)}
+        if days.strip().lower() in ("weekdays", "weekday"):
+            chosen = [0, 1, 2, 3, 4]
+        else:
+            chosen = []
+            for part in days.split(","):
+                key = part.strip()[:3].lower()
+                if key not in lookup:
+                    await interaction.response.send_message(
+                        f"`{part.strip()}` isn't a day. Use mon,tue,wed,thu,fri,sat,sun.",
+                        ephemeral=True)
+                    return
+                chosen.append(lookup[key])
+        if not chosen:
+            await interaction.response.send_message(
+                "At least one day is needed, or the bot never runs.", ephemeral=True)
+            return
+
+        Overlay().set("schedule.active_days", sorted(set(chosen)))
+        c = bot.reload_config()
+        await interaction.response.send_message(
+            "Running on " + ", ".join(WEEKDAYS[d] for d in c.active_days) + ".",
+            ephemeral=True)
+
+    # -------------------------------------------------------------- channels
+    @group.command(name="channel", description="Change where the bot posts")
+    @discord.app_commands.describe(which="Which channel to change",
+                                   target="The channel to use")
+    @discord.app_commands.choices(which=[
+        discord.app_commands.Choice(name="Standup threads", value="standup_channel_id"),
+        discord.app_commands.Choice(name="Producer digest", value="digest_channel_id"),
+        discord.app_commands.Choice(name="Team notes", value="notes_channel_id"),
+    ])
+    async def set_channel(interaction: discord.Interaction,
+                          which: discord.app_commands.Choice[str],
+                          target: discord.TextChannel):
+        perms = target.permissions_for(interaction.guild.me)
+        missing = [n for n, ok in {
+            "send messages": perms.send_messages,
+            "embed links": perms.embed_links,
+            "create threads": perms.create_public_threads,
+        }.items() if not ok]
+        if missing:
+            # Checked now rather than discovered at 11:00 with people waiting.
+            await interaction.response.send_message(
+                f"I can't use {target.mention} — missing: {', '.join(missing)}.",
+                ephemeral=True)
+            return
+
+        Overlay().set(f"discord.{which.value}", target.id)
+        bot.reload_config()
+        await interaction.response.send_message(
+            f"**{which.name}** now posts to {target.mention}.", ephemeral=True)
+
+    # ---------------------------------------------------------------- limits
+    @group.command(name="limits", description="Change how many questions people get")
+    @discord.app_commands.describe(
+        which="Which cap to change", value="New value, 1 to 10")
+    @discord.app_commands.choices(which=[
+        discord.app_commands.Choice(name="Active tickets asked about", value="max_in_progress"),
+        discord.app_commands.Choice(name="Review tickets asked about", value="max_review"),
+        discord.app_commands.Choice(name="To Do tickets asked about", value="max_todo"),
+        discord.app_commands.Choice(name="WIP cap before flagging", value="max_active_wip"),
+    ])
+    async def limits(interaction: discord.Interaction,
+                     which: discord.app_commands.Choice[str], value: int):
+        if not 1 <= value <= 10:
+            await interaction.response.send_message(
+                "Pick between 1 and 10. Past that people stop answering.",
+                ephemeral=True)
+            return
+        Overlay().set(f"limits.{which.value}", value)
+        bot.reload_config()
+        await interaction.response.send_message(
+            f"**{which.name}** is now **{value}**.", ephemeral=True)
+
+    # --------------------------------------------------------------- cleanup
+    @group.command(name="cleanup", description="Archive or delete old standup threads")
+    @discord.app_commands.describe(
+        older_than="Only touch threads older than this",
+        delete="Delete instead of archiving. Cannot be undone.")
+    @discord.app_commands.choices(older_than=[
+        discord.app_commands.Choice(name="7 days", value=7),
+        discord.app_commands.Choice(name="14 days", value=14),
+        discord.app_commands.Choice(name="30 days", value=30),
+    ])
+    async def cleanup(interaction: discord.Interaction,
+                      older_than: discord.app_commands.Choice[int],
+                      delete: bool = False):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await bot.clean("threads", delete, older_than.value)
+        except Exception as e:
+            await interaction.followup.send(f"Cleanup failed: {e}", ephemeral=True)
+            return
+        verb = "Deleted" if delete else "Archived"
+        await interaction.followup.send(
+            f"{verb} standup threads older than {older_than.name}. "
+            f"Session records are untouched.", ephemeral=True)
+
+    # ------------------------------------------------------------------- run
+    @group.command(name="post", description="Post today's standup now")
+    async def post_now(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await bot.post_standup()
+        except Exception as e:
+            await interaction.followup.send(f"Failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send("Standup posted.", ephemeral=True)
+
+    @group.command(name="digest", description="Post the digest now")
+    async def digest_now(interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            await bot.post_digest()
+        except Exception as e:
+            await interaction.followup.send(f"Failed: {e}", ephemeral=True)
+            return
+        await interaction.followup.send("Digest posted.", ephemeral=True)
+
+    # ----------------------------------------------------------------- reset
+    @group.command(name="reset",
+                   description="Discard all runtime changes and use config.yaml")
+    async def reset(interaction: discord.Interaction):
+        Overlay().clear()
+        bot.reload_config()
+        await interaction.response.send_message(
+            "Runtime overrides cleared. Back to the committed defaults.",
+            ephemeral=True)
+
+    tree.add_command(group)
+
+
 class StandupBot(discord.Client):
     def __init__(self, config: Config, jira: JiraClient,
                  post_on_start: bool = False, digest_on_start: bool = False,
@@ -563,6 +810,7 @@ class StandupBot(discord.Client):
         intents.members = True          # needed to resolve people and add them to threads
         super().__init__(intents=intents)
         self.config = config
+        self.tree = discord.app_commands.CommandTree(self)
         self.jira = jira
         self.post_on_start = post_on_start
         self.digest_on_start = digest_on_start
@@ -575,6 +823,25 @@ class StandupBot(discord.Client):
         # Registering the dynamic item is what lets taps on messages from
         # previous runs still resolve to a handler.
         self.add_dynamic_items(StandupButton, StartSelect)
+
+        register_commands(self)
+        # Guild-scoped sync appears immediately. Global commands take up to an
+        # hour to propagate, which is unusable while iterating.
+        self.tree.copy_global_to(guild=discord.Object(id=self.config.guild_id))
+        await self.tree.sync(guild=discord.Object(id=self.config.guild_id))
+        print("Slash commands synced")
+
+    def reload_config(self):
+        """
+        Re-read config after a settings change.
+
+        The scheduler reads self.config on every tick, so replacing the object
+        is enough — no restart, and a mistimed change can't leave the scheduler
+        running on stale times for the rest of the day.
+        """
+        from config import load_config
+        self.config = load_config()
+        return self.config
 
     async def on_ready(self):
         print(f"Connected as {self.user}")

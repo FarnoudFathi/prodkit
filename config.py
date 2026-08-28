@@ -21,6 +21,8 @@ from pathlib import Path
 import yaml
 from dotenv import load_dotenv
 
+from settings import Overlay
+
 from models import Person, State, WorkCalendar
 
 CONFIG_PATH = Path(__file__).parent / "config.yaml"
@@ -229,6 +231,12 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         raise ConfigError(f"No config file at {path}")
 
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+    # Runtime overrides from the persistent volume are merged over the
+    # committed defaults. Everything below validates the merged result, so a
+    # bad value set from Discord fails the same checks a bad value in the file
+    # would — it just fails at reload rather than at deploy.
+    raw = Overlay().apply(raw)
 
     jira = _require(raw, "jira", "root")
     discord_cfg = _require(raw, "discord", "root")
