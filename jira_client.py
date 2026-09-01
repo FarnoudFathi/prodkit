@@ -551,9 +551,19 @@ class JiraClient:
         work. They're still reachable via search() when the cycle-time engine
         needs completed history.
         """
+        # Scope to the open sprint when configured. Without this the bot reads
+        # the entire project, so a team with a 200-item backlog gets asked about
+        # work nobody intends to start this quarter. The board's To Do column
+        # only shows sprint-committed work; the query has to match that or the
+        # prompt and the board disagree about what "To Do" means.
+        scope = ""
+        if self.config.sprint_only:
+            scope = "AND sprint in openSprints() "
+
         issues = self.search(
             f"project = {self.config.project_key} "
             f"AND statusCategory != Done "
+            f"{scope}"
             f"ORDER BY duedate ASC, key ASC"
         )
         self._enrich_blockers(issues)

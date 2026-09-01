@@ -137,6 +137,15 @@ def check_jira(config, jira: JiraClient, report: Report) -> None:
                 report.add(FAIL, "completion transition",
                            f"{sample.key} cannot reach {target.value}")
 
+        # sprint_only silently returns nothing when no sprint is running, and
+        # the symptom is that nobody gets prompted with no error anywhere.
+        if config.sprint_only and not issues:
+            report.add(FAIL, "open sprint",
+                       "sprint_only is on but the query returned nothing — "
+                       "start a sprint, or set jira.sprint_only: false")
+        elif config.sprint_only:
+            report.add(PASS, "open sprint", f"{len(issues)} issues in scope")
+
         unassigned = [i for i in issues if not i.assignee_id]
         if unassigned:
             # Unassigned tickets belong to nobody's standup, so nobody is ever

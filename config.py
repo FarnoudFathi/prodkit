@@ -63,6 +63,7 @@ class Config:
     status_map: dict[str, State]
     active_states: set[State]
     blocked_label: str
+    sprint_only: bool
     review: ReviewSettings
 
     guild_id: int
@@ -380,6 +381,7 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         status_map=status_map,
         active_states=active_states,
         blocked_label=jira.get("blocked_label", "blocked"),
+        sprint_only=bool(jira.get("sprint_only", True)),
         review=review,
         guild_id=int(_require(discord_cfg, "guild_id", "discord")),
         standup_channel_id=int(_require(discord_cfg, "standup_channel_id", "discord")),

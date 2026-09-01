@@ -33,6 +33,16 @@ jira:
   # state and cycle-time measurement is unaffected.
   blocked_label: blocked
 
+  # Restrict the bot to the open sprint. Without this it reads the whole
+  # project, so a team with a large backlog gets asked about work nobody
+  # intends to start this quarter — and the board's To Do column, which only
+  # shows sprint-committed work, disagrees with what the bot asks about.
+  #
+  # Set false if the team doesn't use sprints, or temporarily for a smoke test
+  # before a sprint has been started. With it true and no sprint running, the
+  # query returns nothing and nobody is prompted.
+  sprint_only: false
+
 review:
   # When off, the completion button reads "Done" and closes the ticket.
   # When on, it reads "Ready for review", moves the ticket to In Review, and
@@ -159,8 +169,7 @@ limits:
   # notice, which is what the digest flag is for.
   max_active_wip: 3
 
-
-    team:
+team:
   - name: Farnoud
     discipline: Production
     jira_account_id: "70121:ea3b346f-d9d2-45f8-8c40-2290145e7a23"
@@ -210,34 +219,9 @@ limits:
     work_end: 18
 
   - name: Foroud
-    discipline: Design
+    discipline: Concept
     jira_account_id: "70121:5d0921ff-a775-46f8-bb61-9a68848720fa"
     discord_user_id: 1105229842737275099
     timezone: America/Vancouver
     work_start: 9
     work_end: 18
-
-  # The five below join on test day. Their Jira account IDs appear once they
-  # accept a board invite; their Discord user IDs appear in check.py output
-  # once they join the server. Neither has to be asked for by hand.
-  #
-  # - name: Levi
-  #   discipline: Engineering
-  #   jira_account_id: ""
-  #   discord_user_id: 0
-  #   timezone: America/Vancouver
-  #   work_start: 9
-  #   work_end: 18
-  #
-  # - name: Sang
-  #   discipline: Art
-  #   ...
-  #
-  # - name: Mia
-  #   discipline: UI
-  #
-  # - name: Luca
-  #   discipline: Rigging
-  #
-  # - name: Jordan
-  #   discipline: Audio
