@@ -745,28 +745,51 @@ def register_commands(bot):
             f"**{which.name}** is now **{value}**.", ephemeral=True)
 
     # --------------------------------------------------------------- cleanup
-    @group.command(name="cleanup", description="Archive or delete old standup threads")
+    @group.command(name="cleanup", description="Archive or delete old threads and digests")
     @discord.app_commands.describe(
-        older_than="Only touch threads older than this",
+        what="What to clean up",
+        older_than="Only touch things older than this",
         delete="Delete instead of archiving. Cannot be undone.")
-    @discord.app_commands.choices(older_than=[
-        discord.app_commands.Choice(name="7 days", value=7),
-        discord.app_commands.Choice(name="14 days", value=14),
-        discord.app_commands.Choice(name="30 days", value=30),
-    ])
+    @discord.app_commands.choices(
+        what=[
+            discord.app_commands.Choice(name="Standup threads", value="threads"),
+            discord.app_commands.Choice(name="Digest posts", value="digest"),
+            discord.app_commands.Choice(name="Everything", value="all"),
+        ],
+        older_than=[
+            # Zero exists for one situation: clearing a test run immediately,
+            # where waiting a week defeats the purpose.
+            discord.app_commands.Choice(name="Any age", value=0),
+            discord.app_commands.Choice(name="1 day", value=1),
+            discord.app_commands.Choice(name="7 days", value=7),
+            discord.app_commands.Choice(name="14 days", value=14),
+            discord.app_commands.Choice(name="30 days", value=30),
+        ])
     async def cleanup(interaction: discord.Interaction,
+                      what: discord.app_commands.Choice[str],
                       older_than: discord.app_commands.Choice[int],
                       delete: bool = False):
+        # Digest posts are plain channel messages with no archive concept, so
+        # cleaning them without deleting would silently do nothing.
+        if what.value in ("digest", "all") and not delete:
+            await interaction.response.send_message(
+                "Digest posts can only be deleted, not archived — "
+                "set `delete: True`, or choose Standup threads.", ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True)
         try:
-            await bot.clean("threads", delete, older_than.value)
+            await bot.clean(what.value, delete, older_than.value)
         except Exception as e:
             await interaction.followup.send(f"Cleanup failed: {e}", ephemeral=True)
             return
+
         verb = "Deleted" if delete else "Archived"
+        scope = ("of any age" if older_than.value == 0
+                 else f"older than {older_than.name}")
         await interaction.followup.send(
-            f"{verb} standup threads older than {older_than.name}. "
-            f"Session records are untouched.", ephemeral=True)
+            f"{verb} **{what.name.lower()}** {scope}. "
+            f"Session records on the volume are untouched.", ephemeral=True)
 
     # ------------------------------------------------------------------- run
     @group.command(name="post", description="Post today's standup now")
