@@ -41,7 +41,7 @@ jira:
   # Set false if the team doesn't use sprints, or temporarily for a smoke test
   # before a sprint has been started. With it true and no sprint running, the
   # query returns nothing and nobody is prompted.
-  sprint_only: false
+  sprint_only: true
 
 review:
   # When off, the completion button reads "Done" and closes the ticket.
