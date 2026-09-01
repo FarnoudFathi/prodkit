@@ -902,10 +902,23 @@ class StandupBot(discord.Client):
             except discord.HTTPException:
                 return
 
-        await thread.send(
-            f"{person.mention} standup closes at {self.config.cutoff_time} — "
-            f"the buttons above are still live."
-        )
+        # A nudge posted only into the thread reaches nobody. The person hasn't
+        # answered, which usually means they haven't opened the thread — so
+        # posting there is a reminder delivered to the place they are already
+        # not looking. The DM is the nudge; the thread mention is the fallback
+        # for anyone with DMs closed.
+        member = guild_member(self, person)
+        text = (f"Standup closes at {self.config.cutoff_time} — "
+                f"the buttons are still live. {thread.mention}")
+
+        if member and self.config.dm_thread_link:
+            try:
+                await member.send(text)
+                return
+            except discord.Forbidden:
+                print(f"  {person.name}: DMs closed, nudging in thread instead")
+
+        await thread.send(f"{person.mention} {text}")
 
     async def post_eod(self, person, date_key: str, now: datetime):
         """
