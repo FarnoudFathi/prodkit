@@ -159,11 +159,60 @@ limits:
   # notice, which is what the digest flag is for.
   max_active_wip: 3
 
-team:
+
+    team:
   - name: Farnoud
-    discipline: Design
+    discipline: Production
     jira_account_id: "70121:ea3b346f-d9d2-45f8-8c40-2290145e7a23"
     discord_user_id: 699984861632659527
+    timezone: America/Vancouver
+    work_start: 9
+    work_end: 18
+
+  - name: Levi
+    discipline: Engineering
+    jira_account_id: "712020:bc75b9fb-7854-4196-b3c1-fd01db8c88bc"
+    discord_user_id: 584995409647108106
+    timezone: America/Vancouver
+    work_start: 9
+    work_end: 18
+
+  - name: Sang
+    discipline: Art
+    jira_account_id: "712020:43c3ce37-4a26-4d55-9a85-e470d8c5df0b"
+    discord_user_id: 138777563983118336
+    timezone: America/Vancouver
+    work_start: 9
+    work_end: 18
+
+  - name: Mia
+    discipline: UI
+    jira_account_id: "712020:fbec3196-eba2-4770-9133-fa001c5b8d6d"
+    discord_user_id: 579508053456584724
+    timezone: America/Vancouver
+    work_start: 9
+    work_end: 18
+
+  - name: Luca
+    discipline: Rigging
+    jira_account_id: "712020:a8146a9f-4fb3-4ea1-bc97-956d659c09c9"
+    discord_user_id: 684743308249006100
+    timezone: America/Vancouver
+    work_start: 9
+    work_end: 18
+
+  - name: Jordan
+    discipline: Audio
+    jira_account_id: "5ed5b2a8322f9a0c1cf8e0e2"
+    discord_user_id: 249753105439129600
+    timezone: America/Vancouver
+    work_start: 9
+    work_end: 18
+
+  - name: Foroud
+    discipline: Design
+    jira_account_id: "70121:5d0921ff-a775-46f8-bb61-9a68848720fa"
+    discord_user_id: 1105229842737275099
     timezone: America/Vancouver
     work_start: 9
     work_end: 18
