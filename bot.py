@@ -908,12 +908,20 @@ class StandupBot(discord.Client):
         """
         A quiet reminder before cutoff, to whoever hasn't answered.
 
-        Posted into their existing thread rather than as a new message, and
-        phrased as a time check rather than a chase. The scheduler only asks for
-        this when they genuinely haven't responded, so nobody who has already
-        answered gets pinged.
+        Phrased as a time check rather than a chase.
+
+        The "has this person answered" check lives here rather than only in the
+        scheduler. The scheduler decides from a session it loaded at the start
+        of its tick, which can be stale by the time the event actually runs —
+        and nudging someone who already answered is the fastest way to make a
+        tool feel broken. The check belongs immediately before the send.
         """
         session = STORE.load(date_key)
+
+        if session.has_responded(person.discord_user_id):
+            print(f"  {person.name}: already answered, nudge skipped")
+            return
+
         thread_id = session.threads.get(str(person.discord_user_id))
         if not thread_id:
             return
