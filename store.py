@@ -65,7 +65,13 @@ class Answer:
 # Keys used for messages that aren't about a ticket — the wrap message. They
 # must not count as answers, or someone who taps only "Done with standup"
 # reads as a responder while having said nothing.
-PSEUDO_KEYS = {"none"}
+#
+# NOTE_KEY is separate from "none" deliberately. Both the note button and the
+# finish button live on the wrap message, which has no ticket, so both were
+# stored under "none" — and tapping "Done with standup" after adding a note
+# silently overwrote the note.
+NOTE_KEY = "__note__"
+PSEUDO_KEYS = {"none", NOTE_KEY}
 
 
 @dataclass

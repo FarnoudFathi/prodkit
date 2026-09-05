@@ -39,7 +39,7 @@ from questions import Kind, PersonPrompt, Question, build_prompt, dropdown_optio
 from digest import DigestInput, DigestResult, build_digest
 from scheduler import Event, Scheduler
 from settings import Overlay
-from store import Store
+from store import NOTE_KEY, Store
 from writeback import apply_action, undo_action
 
 # Answers live on disk, one file per day. Written after every tap, because
@@ -231,10 +231,15 @@ class TextModal(discord.ui.Modal):
         note = f"\n> {text}" if text else ""
 
         if self.action == "note":
-            # Notes go to the digest, not to Jira. A movie ticket is not board
-            # state, and commenting every note onto a ticket would be noise.
-            record(self.date_key, interaction.user.id, self.issue_key, self.action, text)
-            await interaction.response.send_message(f"Noted.{note}", ephemeral=True)
+            # Notes go to the shared channel, not to Jira. A spare cinema ticket
+            # is not board state, and commenting every note onto a ticket would
+            # be noise.
+            #
+            # Stored under NOTE_KEY rather than the wrap message's "none",
+            # because the finish button uses "none" too and would overwrite it.
+            record(self.date_key, interaction.user.id, NOTE_KEY, self.action, text)
+            await interaction.response.send_message(
+                f"Noted — it'll go out with today's digest.{note}", ephemeral=True)
             return
 
         await interaction.response.defer()
