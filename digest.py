@@ -310,13 +310,24 @@ def build_digest(inp: DigestInput) -> DigestResult:
 
     # --- gaps -------------------------------------------------------------
     gaps = []
-    if silent:
-        gaps.append("🔇 No response — " + ", ".join(p.name for p in silent))
+
+    # Someone who tapped "Done with standup" without answering is not silent —
+    # they engaged and declined. Listing them under both reads as contradictory
+    # and makes the digest look wrong, so they're reported once, in their own
+    # category.
+    closed_without = {}
     for person in inp.people:
         skipped = inp.session.finished_without_answering(person.discord_user_id)
         if skipped:
-            gaps.append(f"⏭ **{person.name}** closed standup leaving "
-                        f"{len(skipped)} unanswered — {', '.join(skipped)}")
+            closed_without[person.name] = skipped
+
+    truly_silent = [p for p in silent if p.name not in closed_without]
+    if truly_silent:
+        gaps.append("🔇 No response at all — "
+                    + ", ".join(p.name for p in truly_silent))
+    for name, skipped in closed_without.items():
+        gaps.append(f"⏭ **{name}** closed standup without answering "
+                    f"{len(skipped)} question(s) — {', '.join(skipped)}")
     if gaps:
         top.append(Section("Gaps", gaps, severity=1))
 

@@ -105,6 +105,29 @@ def due_events(config: Config, now: datetime, already_fired: set[str],
         ):
             events.append(Event("eod", person))
 
+    # Second digest at close of day. The cutoff digest is a snapshot at 13:00 —
+    # anything answered later, plus every end-of-day check-in, is invisible to
+    # it. Rather than editing the earlier post, a separate one is published:
+    # different purpose, not a correction. This is the one a producer reads to
+    # plan tomorrow.
+    if ("digest_close" not in already_fired and config.team
+            and config.eod_enabled):
+        all_closed = all(
+            _local_now(p, now) >= _scheduled(p, config.eod_close_time, now)
+            for p in config.team
+        )
+        working_day = any(
+            _local_now(p, now).weekday() in config.active_days
+            for p in config.team
+        )
+        # Bounded so a bot started at 02:00 doesn't publish a close-of-day
+        # digest for a day that ended hours ago.
+        not_stale = any(
+            _local_now(p, now).hour < 23 for p in config.team
+        )
+        if all_closed and working_day and not_stale:
+            events.append(Event("digest_close", None))
+
     # Team-wide: only once every person's cutoff has passed.
     if "digest" not in already_fired and config.team:
         all_closed = all(

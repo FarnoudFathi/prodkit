@@ -901,6 +901,8 @@ class StandupBot(discord.Client):
             await self.send_nudge(event.person, date_key)
         elif event.name == "digest":
             await self.post_digest()
+        elif event.name == "digest_close":
+            await self.post_digest(close_of_day=True)
         elif event.name == "eod":
             await self.post_eod(event.person, date_key, now)
 
@@ -1118,8 +1120,15 @@ class StandupBot(discord.Client):
                     print(f"  could not delete a message: {e}")
             print(f"Deleted digest posts older than {older_than_days}d: {removed}")
 
-    async def post_digest(self):
-        """Assemble and post the producer digest."""
+    async def post_digest(self, close_of_day: bool = False):
+        """
+        Assemble and post the producer digest.
+
+        Called twice a day. At cutoff it reports the morning. At close of day it
+        reports everything — late answers, end-of-day check-ins, blockers picked
+        up after lunch. Both come from the same session file, so the second is
+        simply a later reading of the same data.
+        """
         guild = self.get_guild(self.config.guild_id)
         channel = guild.get_channel(self.config.digest_channel_id)
         if channel is None:
@@ -1134,7 +1143,7 @@ class StandupBot(discord.Client):
         # not prompting — a weekend, or a day the schedule was changed.
         if not session.asked:
             print(f"No standup was posted for {date_key} — skipping digest")
-            session.mark_fired("digest")
+            session.mark_fired("digest_close" if close_of_day else "digest")
             STORE.save(session)
             return
 
@@ -1171,7 +1180,8 @@ class StandupBot(discord.Client):
         ]
 
         result = build_digest(DigestInput(
-            date_label=now.strftime("%a %d %b"),
+            date_label=now.strftime("%a %d %b")
+            + (" · close of day" if close_of_day else ""),
             config=self.config,
             session=session,
             previous=STORE.previous_session(date_key),
@@ -1186,7 +1196,9 @@ class StandupBot(discord.Client):
 
         message = await channel.send(embed=digest_embed(result))
 
-        await self.post_notes(session, now)
+        # Notes are a once-a-day thing, posted with the cutoff digest.
+        if not close_of_day:
+            await self.post_notes(session, now)
 
         # The roster goes into a thread on the digest. Threads render collapsed,
         # so the channel stays scannable and the detail is one click away —
@@ -1200,9 +1212,10 @@ class StandupBot(discord.Client):
         except discord.HTTPException as e:
             print(f"  could not create roster thread: {e}")
         session.digest_posted = True
-        session.mark_fired("digest")
+        session.mark_fired("digest_close" if close_of_day else "digest")
         STORE.save(session)
-        print(f"Digest posted to #{channel.name}")
+        label = "Close-of-day digest" if close_of_day else "Digest"
+        print(f"{label} posted to #{channel.name}")
 
     async def post_standup(self, only=None):
         guild = self.get_guild(self.config.guild_id)
@@ -1261,6 +1274,14 @@ class StandupBot(discord.Client):
             prompt = build_prompt(
                 person, issues, self.config, now, last_moved, settled
             )
+            # Somebody with no assigned tickets has nothing to be asked. A
+            # thread containing only "anything else?" is noise, and it makes the
+            # digest report them as a non-responder for a question that was
+            # never really put to them.
+            if prompt.tap_count <= 1:
+                print(f"  {person.name}: no tickets to ask about, skipped")
+                continue
+
             thread_id = await self.deliver(
                 guild, channel, person, prompt, date_key, now
             )
