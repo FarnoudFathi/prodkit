@@ -161,9 +161,21 @@ class Scheduler:
 
     def __init__(self, bot, config: Config, store):
         self.bot = bot
-        self.config = config
         self.store = store
         self._task: asyncio.Task | None = None
+
+    @property
+    def config(self) -> Config:
+        """
+        Always the bot's current config, never a captured copy.
+
+        Holding a reference taken at construction meant a slash command could
+        change the schedule, report success, and change nothing — because
+        reload_config replaced the bot's config object while the scheduler kept
+        pointing at the old one. Reading through the bot on every access is the
+        only way a runtime change reaches the thing that fires events.
+        """
+        return self.bot.config
 
     def start(self):
         self._task = asyncio.create_task(self._loop())

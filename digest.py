@@ -105,9 +105,23 @@ def _theirs(inp: DigestInput, person: Person) -> list[Issue]:
 
 
 def _due_soon(inp: DigestInput, person: Person) -> list[tuple[Issue, float]]:
+    """
+    Deadline pressure on this person's own work.
+
+    Tickets in review are excluded. When review is enabled the ticket is
+    reassigned to the reviewer, so its deadline would otherwise be reported
+    against them — flagging the producer as four days overdue on work somebody
+    else did and already finished. The reviewer didn't miss the deadline.
+
+    The information isn't lost: a review ticket that's overdue says so on its
+    line in the review queue, where it reads as "sign this off" rather than
+    "you are late".
+    """
     out = []
     for issue in _theirs(inp, person):
         if not issue.due_date or issue.state is State.DONE:
+            continue
+        if issue.state is State.IN_REVIEW:
             continue
         remaining = business_hours_until(inp.now, issue.due_date, person.calendar)
         if remaining <= DUE_WINDOW_HOURS:
@@ -213,10 +227,28 @@ def _review_lines(inp: DigestInput, person: Person) -> list[str]:
     for issue in _theirs(inp, person):
         if issue.state is not State.IN_REVIEW:
             continue
-        detail = inp.stale.get(issue.key, "")
+
+        bits = []
+        if issue.key in inp.stale:
+            bits.append(inp.stale[issue.key])
+
+        # Deadline shown here rather than as the reviewer's own overdue work.
+        if issue.due_date:
+            remaining = business_hours_until(
+                inp.now, issue.due_date, person.calendar
+            )
+            if remaining < 0:
+                bits.append(f"**deadline passed {humanise(abs(remaining))} ago**")
+            elif remaining <= DUE_WINDOW_HOURS:
+                bits.append(f"due in {humanise(remaining)}")
+
         out.append(f"`{issue.key}` {_summary(inp, issue.key)}"
-                   + (f" · {detail}" if detail else ""))
+                   + (" · " + " · ".join(bits) if bits else ""))
     return out
+
+
+def _has_reviews(inp: DigestInput, person: Person) -> bool:
+    return any(i.state is State.IN_REVIEW for i in _theirs(inp, person))
 
 
 def _is_idle(inp: DigestInput, person: Person) -> bool:
@@ -265,9 +297,15 @@ def build_digest(inp: DigestInput) -> DigestResult:
 
     # --- someone answered but named no work for today
     for person in responded:
-        if not _working_today(inp, person) and not _is_idle(inp, person):
-            attention.append(f"⛔ **{person.name}** has no ticket in progress today")
-            flagged.add(person.name)
+        if _working_today(inp, person) or _is_idle(inp, person):
+            continue
+        # A queue of reviews is work. Flagging the reviewer as having nothing in
+        # progress is wrong, and it fires every single day for whoever holds the
+        # review queue — which trains people to ignore the line that matters.
+        if _has_reviews(inp, person):
+            continue
+        attention.append(f"⛔ **{person.name}** has no ticket in progress today")
+        flagged.add(person.name)
 
     for person in inp.people:
         for line in _handoff_lines(inp, person):
@@ -373,8 +411,11 @@ def build_digest(inp: DigestInput) -> DigestResult:
             lines.append("**Last standup** " + " · ".join(previous))
 
         working = _working_today(inp, person)
+        reviews = _review_lines(inp, person)
         if working:
             lines.append("**Today** " + ", ".join(f"`{k}`" for k in working))
+        elif reviews:
+            lines.append(f"**Today** reviewing {len(reviews)} ticket(s)")
         elif inp.session.has_responded(person.discord_user_id):
             lines.append("**Today** ⛔ nothing in progress")
         else:
@@ -385,7 +426,6 @@ def build_digest(inp: DigestInput) -> DigestResult:
         if upcoming:
             lines.append("**Due within 2 working days** " + " · ".join(upcoming))
 
-        reviews = _review_lines(inp, person)
         if reviews:
             lines.append("**To review** " + " · ".join(reviews))
 
